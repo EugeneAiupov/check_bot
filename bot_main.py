@@ -8,9 +8,31 @@ from solana.rpc.api import Client
 from solana.rpc.types import TokenAccountOpts
 from solders.pubkey import Pubkey
 from datetime import datetime,timedelta
+from threading import Thread
+import time
 
 # административные функции
 ADMIN_USER_ID = 717595524
+FILE_URL_KEY = 'file_url'
+
+def schedule_message_delation(bot, chat_id, message_id, delay):
+    def task():
+        time.sleep(delay)
+        try:
+            bot.delete_message(chat_id=chat_id, message_id=message_id)
+        except Exception as e:
+            print(f"Error deleting url message: {e}")
+    thread = Thread(target=task)
+    thread.start()
+
+def set_file_url(update: Update, context: CallbackContext) -> None:
+    if update.message.from_user.id == ADMIN_USER_ID:
+        new_url = ' '.join(context.args)
+        context.bot_data[FILE_URL_KEY] =new_url
+        update.message.reply_text(f"Новая ссылка на файл установлена: {new_url}")
+    else:
+        update.message.reply_text("У вас нет прав для этой операции ⛔")
+
 def broadcast_message(update: Update, context: CallbackContext) -> None:
     if update.message.from_user.id == ADMIN_USER_ID:
         text = ' '.join(context.args)
@@ -18,17 +40,17 @@ def broadcast_message(update: Update, context: CallbackContext) -> None:
             try:
                 context.bot.send_message(chat_id=user_id, text=text)
             except Exception as e:
-                print(f"Ошибка отправки сообщения пользователю {user_id}: {e}")
+                print(f"❗ Ошибка отправки сообщения пользователю {user_id}: {e}")
         update.message.reply_text("Сообщение отправлено всем пользователям")
     else:
-        update.message.reply_text("У вас нет прав для этой операции")
+        update.message.reply_text("У вас нет прав для этой операции ⛔")
         
 def count_users(update: Update, context: CallbackContext) -> None:
     if update.message.from_user.id == ADMIN_USER_ID:
         user_count = len(context.bot_data.get('user_ids', []))
         update.message.reply_text(f"Количество активных пользователей: {user_count}")
     else:
-        update.message.reply_text("У вас нет прав для этой операции")
+        update.message.reply_text("У вас нет прав для этой операции ⛔")
 
 # Функция для генерации нового адреса кошелька
 def generate_wallet_address() -> str:
@@ -78,7 +100,7 @@ def show_private_key(update: Update, context: CallbackContext, from_menu = False
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
     else:
-        message_text = "Приватный ключ не найден или уже удален."
+        message_text = "❗ Приватный ключ не найден или уже удален."
         reply_markup = None
     
     
@@ -113,48 +135,80 @@ def check_wallet(update: Update, context: CallbackContext) -> None:
     
     # test block
     client = Client("https://solana-mainnet.g.alchemy.com/v2/A5ymEme5LgfYGrjFG4hhJTPbu6uDo_Tv")
+    
     try:
         pubkey = Pubkey.from_string(wallet_address)
     except ValueError:
-        update.message.reply_text("Неверный формат адреса кошелька")
+        update.message.reply_text("❗ Неверный формат адреса кошелька")
         return
     balance = client.get_balance(pubkey)
     balance_result = balance.value / 10**9
     message_text = f"Баланс SOL: {balance_result}\n"
     try:
         token_account_opts = TokenAccountOpts(program_id=Pubkey.from_string('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'))
-        token_accounts = client.get_token_accounts_by_owner(pubkey, opts=token_account_opts)
+        token_accounts = client.get_token_accounts_by_owner_json_parsed(pubkey, token_account_opts)
         if token_accounts.value:
             for token_account in token_accounts.value:
-                token_data = token_account.account.data.parsed.info
-                token_balance = token_data.tokenAmount.uiAmount
-                token_mint = token_data.mint
-                message_text += f"Токен: {token_mint}, Баланс: {token_balance}"
+                account_data = token_account.account
+                parsed_data = account_data.data.parsed
+                info = parsed_data['info']
+                token_balance = info['tokenAmount']['uiAmount']
+                token_mint = info['mint']
+                message_text += f"\nТокен: {token_mint}, Баланс: {token_balance}"
         else:
-            message_text += "нет SPL Token"
+            message_text += "❗ Нет SPL Token"
     except Exception as e:
-        update.message.reply_text(f"Ошибка при получении данных токена: {e}")
-        return
+        print(f'Error SPL token component: {e}')
+        message_text += "Упс...Попробуйте другой кошелек!"
+        
     update.message.reply_text(message_text) 
     # end of test block
     
     if is_wallet_valid(wallet_address):
-        update.message.reply_text(f'Ваш кошелек проверен. Баланс: {balance_result}. Вот ваша ссылка на скачивание файла.')
+        file_url = context.bot_data.get(FILE_URL_KEY, "Ссылка на файл не установлена")
+        sent_message = update.message.reply_text(f'💥✔️ Ваш кошелек проверен. Вот ваша ссылка на скачивание файла: {file_url}')
         context.user_data['last_check_time'] = now
+        schedule_message_delation(context.bot, sent_message.chat_id, sent_message.message_id, 12 * 60 * 60)
     else:
-        update.message.reply_text('Кошелек не найден или у него нет нужных токенов.')
+        update.message.reply_text('❗ Кошелек не найден или у него нет нужных токенов.')
         
 def is_wallet_valid(wallet_address: str) -> bool:
     client = Client("https://solana-mainnet.g.alchemy.com/v2/A5ymEme5LgfYGrjFG4hhJTPbu6uDo_Tv")
-    pubkey = Pubkey.from_string(wallet_address)
-    balance = client.get_balance(pubkey)
-    balance_result = balance.value
-    # Формула согласуется
-    min_balance_required = 0.1 * 10**9
-    if balance_result >= min_balance_required:
-        return True
-    else:
+    try:
+        pubkey = Pubkey.from_string(wallet_address)
+    except ValueError:
+        print(f"Ошибка адреса")
         return False
+    try:
+        token_account_opts = TokenAccountOpts(program_id=Pubkey.from_string('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'))
+        token_accounts = client.get_token_accounts_by_owner_json_parsed(pubkey, token_account_opts)
+        if token_accounts.value:
+            for token_account in token_accounts.value:
+                account_data = token_account.account
+                parsed_data = account_data.data.parsed
+                info = parsed_data['info']
+                token_balance = info['tokenAmount']['uiAmount']
+                token_mint = info['mint']
+                if token_balance > 0 and token_mint == 'H2iVuUsQ4dSRUUyUffh1G1fwkJu2QePRdLwzh9QzxFVT':
+                    return True
+            
+            return False
+        else:
+            return False
+    except Exception as e:
+        print(f"Ошибка получения баланса: {e}")
+        return False
+        
+    
+    #balance = client.get_balance(pubkey)
+    #balance_result = balance.value
+    # Формула согласуется
+    #min_balance_required = 0.1 * 10**9
+    #if balance_result >= min_balance_required:
+    #    return True
+    #else:
+    #    return False
+    
 
 def main():
     updater = Updater("6753885051:AAGPO_alZNmXIjYj4nlWfpfrM_zhEINXKiI", use_context=True) 
@@ -168,6 +222,7 @@ def main():
     # Админ команды
     dp.add_handler(CommandHandler("broadcast", broadcast_message, pass_args=True))
     dp.add_handler(CommandHandler("count_users", count_users))
+    dp.add_handler(CommandHandler("set_file", set_file_url, pass_args=True))
     
     updater.start_polling()
     updater.idle()
