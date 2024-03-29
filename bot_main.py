@@ -198,16 +198,6 @@ def is_wallet_valid(wallet_address: str) -> bool:
     except Exception as e:
         print(f"Ошибка получения баланса: {e}")
         return False
-        
-    
-    #balance = client.get_balance(pubkey)
-    #balance_result = balance.value
-    # Формула согласуется
-    #min_balance_required = 0.1 * 10**9
-    #if balance_result >= min_balance_required:
-    #    return True
-    #else:
-    #    return False
     
 
 def main():
