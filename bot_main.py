@@ -12,7 +12,7 @@ from threading import Thread
 import time
 
 # административные функции
-ADMIN_USER_ID = 717595524
+ADMIN_USER_ID = 'написать позже'
 FILE_URL_KEY = 'file_url'
 
 def schedule_message_delation(bot, chat_id, message_id, delay):
@@ -201,7 +201,7 @@ def is_wallet_valid(wallet_address: str) -> bool:
     
 
 def main():
-    updater = Updater("6753885051:AAGPO_alZNmXIjYj4nlWfpfrM_zhEINXKiI", use_context=True) 
+    updater = Updater("API key here", use_context=True) 
     
     dp = updater.dispatcher
     dp.add_handler(CommandHandler("start", start))
